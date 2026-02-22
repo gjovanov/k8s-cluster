@@ -14,10 +14,10 @@ Ansible-automated Kubernetes cluster on Hetzner bare metal for deploying a produ
 | Kubernetes | Helm v3 package management | Done |
 | COTURN | Dual TURN/STUN instances on separate public IPs | Done |
 | COTURN | TLS support (TURNS on port 5349 + 443 via SNI) | Done |
-| COTURN | Ephemeral credentials (HMAC-SHA1 shared secret) | Done |
+| COTURN | Long-term credentials (lt-cred-mech) | Done |
 | COTURN | 1024 relay ports per instance (49152-50175) | Done |
 | Networking | iptables DNAT/SNAT port forwarding | Done |
-| Networking | nginx SNI proxy (TLS multiplexing on port 443) | Done |
+| Networking | ~~nginx SNI proxy~~ (removed, nginx2 no longer needed) | Removed |
 | Networking | Docker restart hooks (iptables persistence) | Done |
 | TLS | Let's Encrypt wildcard cert via acme.sh + Cloudflare DNS | Done |
 | TLS | Auto-deploy hook (nginx, K8s secret, COTURN restart) | Done |
@@ -36,7 +36,7 @@ Ansible-automated Kubernetes cluster on Hetzner bare metal for deploying a produ
 | Orchestration | Kubernetes 1.29 |
 | CNI | Cilium 1.15.1 (eBPF, no kube-proxy) |
 | TURN Server | [coturn](https://github.com/coturn/coturn) (instrumentisto/coturn) |
-| Proxy | nginx (stream module, SNI routing) |
+| Proxy | Docker nginx (HTTP/3, brotli, GeoIP2 — routes to K8s NodePorts) |
 | TLS | Let's Encrypt (acme.sh, Cloudflare DNS-01) |
 | DNS | Cloudflare (API-managed) |
 | Monitoring | kube-prometheus-stack (Prometheus, Grafana, AlertManager) |
@@ -49,14 +49,14 @@ Ansible-automated Kubernetes cluster on Hetzner bare metal for deploying a produ
 graph TB
     subgraph Internet
         C[WebRTC Clients]
+        U[Users]
     end
 
     subgraph Hetzner["Hetzner Bare Metal"]
         subgraph Host["Host (Ubuntu 22.04)"]
             IPT[iptables DNAT/SNAT]
-            SNI[nginx SNI Proxy :4443]
+            NGX["Docker: nginx<br/>HTTP/3 + brotli + GeoIP2"]
             ACME[acme.sh + Cloudflare DNS]
-            Docker[Docker: nginx, janus, redis, mongo]
         end
 
         subgraph KVM["KVM / libvirt (virbr1 NAT 10.10.10.0/24)"]
@@ -68,6 +68,7 @@ graph TB
 
             subgraph W1["k8s-worker1 (10.10.10.11)"]
                 CT1[COTURN Pod]
+                RL["Roomler namespace<br/>(app, mongo, redis, janus)"]
             end
 
             subgraph W2["k8s-worker2 (10.10.10.12)"]
@@ -80,14 +81,12 @@ graph TB
         CF[roomler.live + coturn.roomler.live]
     end
 
+    U -->|"https://roomler.live"| NGX
     C -->|"turn:94.130.141.98:3478"| IPT
     C -->|"turns:coturn.roomler.live:5349"| IPT
-    C -->|"turns:coturn.roomler.live:443"| IPT
     IPT -->|":3478, :5349"| CT1
     IPT -->|":3478, :5349"| CT2
-    IPT -->|":443"| SNI
-    SNI -->|"SNI: coturn.*"| CT1
-    SNI -->|"SNI: other"| Docker
+    NGX -->|":30030"| RL
     ACME -->|cert renewal| CF
     CT1 ---|hostNetwork| W1
     CT2 ---|hostNetwork| W2
@@ -106,23 +105,26 @@ graph TB
                            |
             +--------------+--------------+
             |              |              |
-     :3478 (UDP/TCP)  :5349 (TCP)    :443 (TCP)
+     :3478 (UDP/TCP)  :5349 (TCP)    :443 (HTTPS)
             |              |              |
-    +-------+--------------+--------------+--------+
-    |              iptables DNAT/SNAT              |
-    |  IP1 94.130.141.98 -> 10.10.10.11 (worker1) |
-    |  IP2 94.130.141.74 -> 10.10.10.12 (worker2) |
-    |  IP1:443 -> 127.0.0.1:4443 (SNI proxy)      |
-    +----------------------------------------------+
-                           |
-              +------------+------------+
-              |                         |
-    +---------+----------+    +---------+----------+
-    | k8s-worker1        |    | k8s-worker2        |
-    | COTURN Pod         |    | COTURN Pod         |
-    | ext: 94.130.141.98 |    | ext: 94.130.141.74 |
-    | relay: 49152-50175 |    | relay: 49152-50175 |
-    +--------------------+    +--------------------+
+    +-------+--------------+---+    +----+--------------------+
+    |    iptables DNAT/SNAT    |    | Docker nginx            |
+    | IP1 → worker1            |    | HTTP/3, brotli, GeoIP2  |
+    | IP2 → worker2            |    | roomler.live → :30030   |
+    +--------------------------+    | janus.* → :30808/:30818 |
+               |                    +-------------------------+
+    +----------+---------+                    |
+    |                    |            +-------+--------+
+    | k8s-worker1        |            | K8s NodePorts  |
+    | COTURN + Roomler   |            | (10.10.10.11)  |
+    | ext: 94.130.141.98 |            +----------------+
+    | relay: 49152-50175 |
+    +--------------------+
+    | k8s-worker2        |
+    | COTURN             |
+    | ext: 94.130.141.74 |
+    | relay: 49152-50175 |
+    +--------------------+
 ```
 
 ## Prerequisites
@@ -230,19 +232,19 @@ Each COTURN instance runs as a K8s pod with `hostNetwork: true`, pinned to a spe
 | TLS port | 5349 (TCP) |
 | Alt TLS port | 443 (TCP, via SNI proxy) |
 | Relay port range | 49152 - 50175 (1024 ports) |
-| Auth method | `use-auth-secret` (ephemeral HMAC-SHA1 credentials) |
+| Auth method | `lt-cred-mech` (long-term credentials) |
 | TLS cert | Let's Encrypt wildcard (`*.roomler.live`) |
 
-### Ephemeral Credentials
+### Long-Term Credentials
 
-COTURN uses time-limited credentials derived from the shared secret:
+COTURN uses `lt-cred-mech` with a static username and HMAC key. Generate the key with:
 
+```bash
+# Inside COTURN pod
+kubectl exec -n coturn <pod> -- turnadmin -k -u <username> -r roomler.live -p <password>
 ```
-username = <unix-expiry-timestamp>:<arbitrary-id>
-credential = Base64(HMAC-SHA1(secret, username))
-```
 
-Clients generate credentials client-side (see `coturn_test.html`) or server-side before each WebRTC session. Credentials expire after the configured TTL (default: 86400s = 24h).
+The generated key (e.g., `0x32c09cdc8033e01088f9b6b2f7450518`) is stored in the COTURN ConfigMap as `user=<username>:<key>`.
 
 ### Testing COTURN
 
@@ -345,7 +347,7 @@ The deploy hook (`scripts/acme-deploy-hook.sh`) automatically:
 |---------|----------|
 | COTURN pods not starting | `make kubectl ARGS="describe pod -n coturn"`, check TLS secret exists |
 | Relay tests fail | Verify iptables: `sudo iptables -t nat -L COTURN_DNAT -n -v` |
-| SNI proxy not routing | Check `sudo nginx -t`, verify Docker nginx IP in upstream conf |
+| Roomler SSR hangs | Stale iptables rule may intercept TCP 443. Check `iptables -t nat -L COTURN_DNAT -n` |
 | iptables lost after reboot | Check systemd service: `sudo systemctl status coturn-iptables` |
 | Cert renewal fails | Check acme.sh log: `sudo cat /root/.acme.sh/acme.sh.log` |
 | Grafana not accessible | `make grafana-tunnel`, check NodePort 30300 |
