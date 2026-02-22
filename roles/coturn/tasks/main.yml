@@ -1,0 +1,139 @@
+---
+# =============================================================================
+# Role: coturn
+# Deploy COTURN to K8s with hostNetwork, 2 Deployments (one per worker)
+# =============================================================================
+
+# --- Stop existing Docker coturn (don't remove) ---
+- name: Stop existing Docker coturn container
+  command: docker stop coturn
+  delegate_to: localhost
+  become: yes
+  changed_when: false
+  failed_when: false
+
+# --- Create namespace ---
+- name: Create coturn namespace
+  command: kubectl create namespace {{ coturn_namespace }}
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  register: ns_create
+  changed_when: ns_create.rc == 0
+  failed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+# --- Copy TLS certs from host to master (src resolved on Ansible controller) ---
+- name: Copy TLS cert to master
+  copy:
+    src: "{{ coturn_tls_cert_host_path }}"
+    dest: /tmp/coturn-tls.crt
+    mode: '0644'
+
+- name: Copy TLS key to master
+  copy:
+    src: "{{ coturn_tls_key_host_path }}"
+    dest: /tmp/coturn-tls.key
+    owner: "{{ vm_user }}"
+    mode: '0600'
+
+# --- Create TLS secret ---
+- name: Check if TLS secret exists
+  command: kubectl get secret coturn-tls -n {{ coturn_namespace }}
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  register: tls_secret_check
+  changed_when: false
+  failed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Create TLS secret
+  command: >
+    kubectl create secret tls coturn-tls
+    --cert=/tmp/coturn-tls.crt
+    --key=/tmp/coturn-tls.key
+    -n {{ coturn_namespace }}
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  when: tls_secret_check.rc != 0
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Clean up TLS files from /tmp
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/coturn-tls.crt
+    - /tmp/coturn-tls.key
+
+# --- Deploy COTURN ConfigMaps and Deployments ---
+- name: Deploy COTURN ConfigMap for each worker
+  template:
+    src: coturn-configmap.yml.j2
+    dest: "/tmp/coturn-configmap-{{ item.name }}.yml"
+    mode: '0644'
+  loop: "{{ coturn_workers }}"
+  loop_control:
+    loop_var: item
+
+- name: Apply COTURN ConfigMaps
+  command: kubectl apply -f /tmp/coturn-configmap-{{ item.name }}.yml
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  loop: "{{ coturn_workers }}"
+  loop_control:
+    loop_var: item
+  changed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Deploy COTURN Deployment for each worker
+  template:
+    src: coturn-deployment.yml.j2
+    dest: "/tmp/coturn-deployment-{{ item.name }}.yml"
+    mode: '0644'
+  loop: "{{ coturn_workers }}"
+  loop_control:
+    loop_var: item
+
+- name: Apply COTURN Deployments
+  command: kubectl apply -f /tmp/coturn-deployment-{{ item.name }}.yml
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  loop: "{{ coturn_workers }}"
+  loop_control:
+    loop_var: item
+  changed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+# --- Wait for pods ---
+- name: Wait for COTURN pods to be ready
+  command: >
+    kubectl wait --for=condition=ready pod
+    -l app=coturn
+    -n {{ coturn_namespace }}
+    --timeout=120s
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  retries: 3
+  delay: 15
+  register: coturn_wait
+  until: coturn_wait.rc == 0
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Verify COTURN pods
+  command: kubectl get pods -n {{ coturn_namespace }} -o wide
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  register: coturn_pods
+  changed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Display COTURN pods
+  debug:
+    var: coturn_pods.stdout_lines

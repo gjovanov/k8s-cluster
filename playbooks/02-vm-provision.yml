@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# Phase 2: VM Provisioning - Create 3 VMs with cloud-init
+# =============================================================================
+- name: "Phase 2: VM Provisioning"
+  hosts: localhost
+  connection: local
+  become: yes
+  roles:
+    - vm-provision

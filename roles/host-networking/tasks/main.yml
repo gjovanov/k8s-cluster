@@ -1,0 +1,123 @@
+---
+# =============================================================================
+# Role: host-networking
+# iptables DNAT/SNAT rules for COTURN port forwarding
+# Critical: Use SNAT (not MASQUERADE) for relay ports to preserve source ports
+# =============================================================================
+
+# --- Backup current iptables ---
+- name: Ensure backup directory exists
+  file:
+    path: "{{ iptables_backup_path | dirname }}"
+    state: directory
+    mode: '0700'
+
+- name: Backup current iptables rules
+  shell: iptables-save > {{ iptables_backup_path }}
+  args:
+    creates: "{{ iptables_backup_path }}"
+
+# --- Install iptables-persistent ---
+- name: Install iptables-persistent (non-interactive)
+  apt:
+    name: iptables-persistent
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+# --- Apply all DNAT/SNAT rules via script template ---
+# The script is idempotent: creates/flushes chains, adds rules
+- name: Generate iptables rules script
+  template:
+    src: coturn-iptables.sh.j2
+    dest: /usr/local/bin/coturn-iptables.sh
+    mode: '0755'
+
+- name: Execute iptables rules script
+  command: /usr/local/bin/coturn-iptables.sh
+  changed_when: false
+
+# --- FORWARD chain: allow traffic to/from VMs ---
+- name: Allow FORWARD to k8s-net
+  command: >
+    iptables -C FORWARD -d 10.10.10.0/24 -j ACCEPT
+  register: fwd_to_check
+  changed_when: false
+  failed_when: false
+
+- name: Add FORWARD rule to k8s-net
+  command: >
+    iptables -I FORWARD 1 -d 10.10.10.0/24 -j ACCEPT
+  when: fwd_to_check.rc != 0
+
+- name: Allow FORWARD from k8s-net
+  command: >
+    iptables -C FORWARD -s 10.10.10.0/24 -j ACCEPT
+  register: fwd_from_check
+  changed_when: false
+  failed_when: false
+
+- name: Add FORWARD rule from k8s-net
+  command: >
+    iptables -I FORWARD 2 -s 10.10.10.0/24 -j ACCEPT
+  when: fwd_from_check.rc != 0
+
+# --- Persist iptables ---
+- name: Save iptables rules (persistent)
+  shell: |
+    iptables-save > /etc/iptables/rules.v4
+  changed_when: false
+
+# --- Systemd service to restore rules after Docker restart ---
+- name: Create coturn-iptables systemd service
+  template:
+    src: coturn-iptables.service.j2
+    dest: /etc/systemd/system/coturn-iptables.service
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Enable coturn-iptables service
+  systemd:
+    name: coturn-iptables
+    enabled: yes
+    daemon_reload: yes
+
+# --- Docker restart hook ---
+- name: Create Docker restart hook script
+  template:
+    src: docker-restart-hook.sh.j2
+    dest: /usr/local/bin/docker-restart-hook.sh
+    mode: '0755'
+
+- name: Create Docker override directory
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: '0755'
+
+- name: Add ExecStartPost hook to Docker service
+  template:
+    src: docker-override.conf.j2
+    dest: /etc/systemd/system/docker.service.d/coturn-iptables.conf
+    mode: '0644'
+  notify:
+    - Reload systemd
+
+# --- Verify ---
+- name: Display iptables NAT rules
+  command: iptables -t nat -L {{ iptables_chain_name }} -n -v
+  register: iptables_nat_rules
+  changed_when: false
+
+- name: Show iptables DNAT rules
+  debug:
+    var: iptables_nat_rules.stdout_lines
+
+- name: Display iptables FORWARD rules
+  command: iptables -L FORWARD -n -v --line-numbers
+  register: iptables_fwd_rules
+  changed_when: false
+
+- name: Show FORWARD rules
+  debug:
+    var: iptables_fwd_rules.stdout_lines

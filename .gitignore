@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+files/ssh/
+
+# Ansible
+.ansible_cache
+*.retry
+
+# Kubeconfig
+files/kubeconfig
+
+# Backup
+backup/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log

@@ -1,0 +1,42 @@
+#cloud-config
+hostname: {{ vm.name }}
+fqdn: {{ vm.name }}.{{ libvirt_network_domain }}
+manage_etc_hosts: true
+
+users:
+  - name: {{ vm_user }}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    groups: [adm, sudo]
+    lock_passwd: true
+    ssh_authorized_keys:
+      - {{ ssh_pubkey_content.content | b64decode | trim }}
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - qemu-guest-agent
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - nfs-common
+  - open-iscsi
+
+# Grow root partition to full disk size
+growpart:
+  mode: auto
+  devices: ['/']
+  ignore_growroot_disabled: false
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - systemctl disable --now ufw || true
+
+power_state:
+  mode: reboot
+  timeout: 30
+  condition: true

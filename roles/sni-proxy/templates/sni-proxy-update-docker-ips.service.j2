@@ -1,0 +1,12 @@
+[Unit]
+Description=Update Docker nginx IP in SNI proxy upstream
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sni-proxy-update-docker-ips.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

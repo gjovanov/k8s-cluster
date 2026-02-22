@@ -1,0 +1,78 @@
+---
+# =============================================================================
+# Create a single VM with cloud-init
+# Called in a loop with 'vm' variable
+# =============================================================================
+
+- name: "{{ vm.name }} - Check if VM already exists"
+  command: virsh dominfo {{ vm.name }}
+  register: vm_exists
+  changed_when: false
+  failed_when: false
+
+- name: "{{ vm.name }} - Create VM disk and boot"
+  block:
+    - name: "{{ vm.name }} - Create qcow2 disk from backing image"
+      command: >
+        qemu-img create -f qcow2
+        -F qcow2
+        -b {{ cloud_image_path }}
+        {{ vm_images_dir }}/{{ vm.name }}.qcow2
+        {{ vm.disk_gb }}G
+
+    - name: "{{ vm.name }} - Create cloud-init directory"
+      file:
+        path: "{{ vm_images_dir }}/{{ vm.name }}-cloud-init"
+        state: directory
+        mode: '0755'
+
+    - name: "{{ vm.name }} - Generate cloud-init user-data"
+      template:
+        src: user-data.yml.j2
+        dest: "{{ vm_images_dir }}/{{ vm.name }}-cloud-init/user-data"
+        mode: '0644'
+
+    - name: "{{ vm.name }} - Generate cloud-init meta-data"
+      template:
+        src: meta-data.yml.j2
+        dest: "{{ vm_images_dir }}/{{ vm.name }}-cloud-init/meta-data"
+        mode: '0644'
+
+    - name: "{{ vm.name }} - Generate cloud-init network-config"
+      template:
+        src: network-config.yml.j2
+        dest: "{{ vm_images_dir }}/{{ vm.name }}-cloud-init/network-config"
+        mode: '0644'
+
+    - name: "{{ vm.name }} - Create cloud-init ISO"
+      command: >
+        genisoimage -output {{ vm_images_dir }}/{{ vm.name }}-cidata.iso
+        -volid cidata -joliet -rock
+        {{ vm_images_dir }}/{{ vm.name }}-cloud-init/user-data
+        {{ vm_images_dir }}/{{ vm.name }}-cloud-init/meta-data
+        {{ vm_images_dir }}/{{ vm.name }}-cloud-init/network-config
+
+    - name: "{{ vm.name }} - Create VM with virt-install"
+      command: >
+        virt-install
+        --name {{ vm.name }}
+        --memory {{ vm.memory_mb }}
+        --vcpus {{ vm.vcpus }}
+        --cpu host-passthrough
+        --disk path={{ vm_images_dir }}/{{ vm.name }}.qcow2,format=qcow2,bus=virtio
+        --disk path={{ vm_images_dir }}/{{ vm.name }}-cidata.iso,device=cdrom
+        --network network={{ libvirt_network_name }},mac={{ vm.mac }}
+        --os-variant ubuntu22.04
+        --graphics none
+        --console pty,target_type=serial
+        --import
+        --noautoconsole
+        --boot hd
+
+  when: vm_exists.rc != 0
+
+- name: "{{ vm.name }} - Ensure VM is running"
+  command: virsh start {{ vm.name }}
+  register: vm_start
+  changed_when: vm_start.rc == 0
+  failed_when: false

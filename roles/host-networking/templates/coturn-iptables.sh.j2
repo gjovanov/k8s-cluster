@@ -1,0 +1,89 @@
+#!/bin/bash
+# =============================================================================
+# COTURN iptables DNAT/SNAT rules
+# Idempotent: flushes custom chains before adding rules
+# =============================================================================
+
+set -e
+
+DNAT_CHAIN="{{ iptables_chain_name }}"
+SNAT_CHAIN="{{ iptables_snat_chain_name }}"
+
+# --- Create/Flush DNAT chain ---
+iptables -t nat -N "$DNAT_CHAIN" 2>/dev/null || iptables -t nat -F "$DNAT_CHAIN"
+
+# Ensure chain is in PREROUTING (idempotent)
+iptables -t nat -C PREROUTING -j "$DNAT_CHAIN" 2>/dev/null || \
+  iptables -t nat -I PREROUTING 1 -j "$DNAT_CHAIN"
+
+# --- Create/Flush OUTPUT DNAT chain (for local host access) ---
+OUTPUT_DNAT_CHAIN="${DNAT_CHAIN}_OUTPUT"
+iptables -t nat -N "$OUTPUT_DNAT_CHAIN" 2>/dev/null || iptables -t nat -F "$OUTPUT_DNAT_CHAIN"
+
+# Ensure chain is in OUTPUT (idempotent)
+iptables -t nat -C OUTPUT -j "$OUTPUT_DNAT_CHAIN" 2>/dev/null || \
+  iptables -t nat -I OUTPUT 1 -j "$OUTPUT_DNAT_CHAIN"
+
+# --- Create/Flush SNAT chain ---
+iptables -t nat -N "$SNAT_CHAIN" 2>/dev/null || iptables -t nat -F "$SNAT_CHAIN"
+
+# Ensure chain is in POSTROUTING (idempotent)
+iptables -t nat -C POSTROUTING -j "$SNAT_CHAIN" 2>/dev/null || \
+  iptables -t nat -I POSTROUTING 1 -j "$SNAT_CHAIN"
+
+# --- DNAT port 443 on IP1 to local SNI proxy (IP2 handled by Docker nginx2) ---
+iptables -t nat -A "$DNAT_CHAIN" \
+  -d {{ sni_proxy_public_ip }} -p tcp --dport 443 \
+  -j DNAT --to-destination 127.0.0.1:{{ sni_proxy_listen_port }}
+iptables -t nat -A "$OUTPUT_DNAT_CHAIN" \
+  -d {{ sni_proxy_public_ip }} -p tcp --dport 443 \
+  -j DNAT --to-destination 127.0.0.1:{{ sni_proxy_listen_port }}
+
+{% for rule in coturn_dnat_rules %}
+# --- Rules for {{ rule.public_ip }} --> {{ rule.dest_ip }} ---
+{% for proto in rule.protocols %}
+{% for port in rule.ports %}
+
+# DNAT (PREROUTING): {{ rule.public_ip }} port {{ port }}
+iptables -t nat -A "$DNAT_CHAIN" \
+  -d {{ rule.public_ip }} -p {{ proto }} --dport {{ port }} \
+  -j DNAT --to-destination {{ rule.dest_ip }}:{{ port }}
+
+# DNAT (OUTPUT): {{ rule.public_ip }} port {{ port }} - for local host access
+iptables -t nat -A "$OUTPUT_DNAT_CHAIN" \
+  -d {{ rule.public_ip }} -p {{ proto }} --dport {{ port }} \
+  -j DNAT --to-destination {{ rule.dest_ip }}:{{ port }}
+{% endfor %}
+{% for port_range in rule.port_ranges %}
+
+# DNAT (PREROUTING): {{ rule.public_ip }} relay port range {{ port_range }}
+iptables -t nat -A "$DNAT_CHAIN" \
+  -d {{ rule.public_ip }} -p {{ proto }} --dport {{ port_range }} \
+  -j DNAT --to-destination {{ rule.dest_ip }}
+
+# DNAT (OUTPUT): {{ rule.public_ip }} relay port range {{ port_range }} - for local host access
+iptables -t nat -A "$OUTPUT_DNAT_CHAIN" \
+  -d {{ rule.public_ip }} -p {{ proto }} --dport {{ port_range }} \
+  -j DNAT --to-destination {{ rule.dest_ip }}
+{% endfor %}
+
+{% endfor %}
+
+# SNAT: outbound relay traffic from {{ rule.dest_ip }} to {{ rule.public_ip }}
+# Use SNAT (not MASQUERADE) to preserve source ports for TURN relay
+{% for proto in rule.protocols %}
+{% for port_range in rule.port_ranges %}
+iptables -t nat -A "$SNAT_CHAIN" \
+  -s {{ rule.dest_ip }} -p {{ proto }} --sport {{ port_range }} \
+  -j SNAT --to-source {{ rule.public_ip }}
+{% endfor %}
+{% endfor %}
+
+# General SNAT for non-relay traffic from this worker
+iptables -t nat -A "$SNAT_CHAIN" \
+  -s {{ rule.dest_ip }} ! -d 10.10.10.0/24 \
+  -j SNAT --to-source {{ rule.public_ip }}
+
+{% endfor %}
+
+echo "COTURN iptables rules applied successfully"

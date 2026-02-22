@@ -1,0 +1,50 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ item.name }}-config
+  namespace: {{ coturn_namespace }}
+data:
+  turnserver.conf: |
+    # TURN server configuration for {{ item.name }}
+    # Bound to {{ item.node }} ({{ item.node_ip }}) with external IP {{ item.public_ip }}
+
+    listening-port={{ coturn_listening_port }}
+    tls-listening-port={{ coturn_tls_port }}
+    alt-tls-listening-port={{ coturn_alt_tls_port }}
+
+    # Relay port range (1024 ports)
+    min-port={{ coturn_min_port }}
+    max-port={{ coturn_max_port }}
+
+    # Realm
+    realm={{ coturn_realm }}
+
+    # External IP mapping: public IP / internal IP
+    external-ip={{ item.public_ip }}/{{ item.node_ip }}
+
+    # TLS certificates
+    cert=/etc/coturn/tls/tls.crt
+    pkey=/etc/coturn/tls/tls.key
+
+    # Logging
+    verbose
+    log-file=stdout
+
+    # Security
+    fingerprint
+    use-auth-secret
+    static-auth-secret={{ coturn_auth_secret }}
+    no-software-attribute
+
+    # Disable multicast peers
+    no-multicast-peers
+
+    # Performance
+    proc-quota-size=8000
+    max-bps=0
+    total-quota=0
+    stale-nonce=600
+
+    # CLI (disabled in container)
+    no-cli

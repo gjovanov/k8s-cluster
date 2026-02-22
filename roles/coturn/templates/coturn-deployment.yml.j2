@@ -1,0 +1,81 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ item.name }}
+  namespace: {{ coturn_namespace }}
+  labels:
+    app: coturn
+    instance: {{ item.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coturn
+      instance: {{ item.name }}
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: coturn
+        instance: {{ item.name }}
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: {{ item.node }}
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: coturn
+          image: {{ coturn_image }}
+          args:
+            - "-c"
+            - "/etc/coturn/turnserver.conf"
+          ports:
+            - name: turn-tcp
+              containerPort: {{ coturn_listening_port }}
+              protocol: TCP
+            - name: turn-udp
+              containerPort: {{ coturn_listening_port }}
+              protocol: UDP
+            - name: turn-tls
+              containerPort: {{ coturn_tls_port }}
+              protocol: TCP
+            - name: turns-alt
+              containerPort: {{ coturn_alt_tls_port }}
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/coturn/turnserver.conf
+              subPath: turnserver.conf
+              readOnly: true
+            - name: tls
+              mountPath: /etc/coturn/tls
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: {{ coturn_listening_port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: {{ coturn_listening_port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ item.name }}-config
+        - name: tls
+          secret:
+            secretName: coturn-tls

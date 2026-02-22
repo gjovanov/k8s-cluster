@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# Phase 1: Host Setup - Install KVM/libvirt, create NAT network
+# =============================================================================
+- name: "Phase 1: Host Setup"
+  hosts: localhost
+  connection: local
+  become: yes
+  roles:
+    - host-setup

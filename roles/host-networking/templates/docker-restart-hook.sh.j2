@@ -1,0 +1,17 @@
+#!/bin/bash
+# =============================================================================
+# Hook: re-apply COTURN iptables rules after Docker restart
+# Docker rewrites FORWARD chain on restart, which can break our rules
+# =============================================================================
+
+sleep 2
+/usr/local/bin/coturn-iptables.sh
+
+# Re-add FORWARD rules for k8s-net (Docker may have clobbered them)
+iptables -C FORWARD -d 10.10.10.0/24 -j ACCEPT 2>/dev/null || \
+  iptables -I FORWARD 1 -d 10.10.10.0/24 -j ACCEPT
+
+iptables -C FORWARD -s 10.10.10.0/24 -j ACCEPT 2>/dev/null || \
+  iptables -I FORWARD 2 -s 10.10.10.0/24 -j ACCEPT
+
+echo "COTURN iptables rules restored after Docker restart"

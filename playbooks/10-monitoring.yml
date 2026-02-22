@@ -1,0 +1,9 @@
+---
+# =============================================================================
+# Phase 10: Monitoring Stack (Prometheus + Grafana + AlertManager)
+# =============================================================================
+- name: "Phase 10: Monitoring Stack"
+  hosts: k8s_master
+  become: yes
+  roles:
+    - monitoring

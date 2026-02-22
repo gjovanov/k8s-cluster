@@ -1,0 +1,141 @@
+---
+# =============================================================================
+# Role: host-setup
+# Install KVM/libvirt, create NAT network (virbr1)
+# =============================================================================
+
+- name: Remove stale apt source files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/ansible-ubuntu-ansible-xenial.list
+    - /etc/apt/sources.list.d/ansible-ubuntu-ansible-xenial.list.distUpgrade
+    - /etc/apt/sources.list.d/ansible-ubuntu-ansible-xenial.list.save
+    - /etc/apt/sources.list.d/git-core-ubuntu-ppa-bionic.list
+    - /etc/apt/sources.list.d/git-core-ubuntu-ppa-bionic.list.distUpgrade
+    - /etc/apt/sources.list.d/virtualbox.list
+    - /etc/apt/sources.list.d/virtualbox.list.distUpgrade
+    - /etc/apt/sources.list.d/virtualbox.list.save
+    - /etc/apt/sources.list.d/microsoft-prod.list
+    - /etc/apt/sources.list.d/microsoft-prod.list.distUpgrade
+    - /etc/apt/sources.list.d/kubernetes.list
+
+- name: Clean apt cache and rebuild
+  shell: |
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    dpkg --configure -a || true
+    apt-get update -y
+  args:
+    executable: /bin/bash
+  changed_when: false
+  retries: 3
+  delay: 10
+  register: apt_update
+  until: apt_update.rc == 0
+
+- name: Install KVM and libvirt packages
+  apt:
+    name:
+      - qemu-kvm
+      - libvirt-daemon-system
+      - libvirt-clients
+      - virtinst
+      - bridge-utils
+      - cloud-image-utils
+      - genisoimage
+      - python3-libvirt
+      - python3-lxml
+    state: present
+
+- name: Ensure libvirtd is enabled and running
+  systemd:
+    name: libvirtd
+    enabled: yes
+    state: started
+
+- name: Add user to libvirt group
+  user:
+    name: "{{ host_user }}"
+    groups: libvirt,kvm
+    append: yes
+
+- name: Check if default libvirt network exists
+  command: virsh net-info default
+  register: default_net_check
+  changed_when: false
+  failed_when: false
+
+- name: Disable default libvirt network
+  block:
+    - name: Destroy default network
+      command: virsh net-destroy default
+      failed_when: false
+
+    - name: Undefine default network
+      command: virsh net-autostart default --disable
+      failed_when: false
+  when: default_net_check.rc == 0
+
+- name: Create k8s-net NAT network XML
+  template:
+    src: k8s-net.xml.j2
+    dest: /tmp/k8s-net.xml
+    mode: '0644'
+
+- name: Check if k8s-net network exists
+  command: virsh net-info {{ libvirt_network_name }}
+  register: k8s_net_check
+  changed_when: false
+  failed_when: false
+
+- name: Define k8s-net network
+  command: virsh net-define /tmp/k8s-net.xml
+  when: k8s_net_check.rc != 0
+
+- name: Start k8s-net network
+  command: virsh net-start {{ libvirt_network_name }}
+  register: net_start
+  changed_when: net_start.rc == 0
+  failed_when: false
+
+- name: Set k8s-net to autostart
+  command: virsh net-autostart {{ libvirt_network_name }}
+  changed_when: false
+
+- name: Verify k8s-net is active
+  command: virsh net-info {{ libvirt_network_name }}
+  register: net_info
+  changed_when: false
+
+- name: Display network info
+  debug:
+    var: net_info.stdout_lines
+
+- name: Verify Docker containers are still running
+  command: docker ps --format '{{ "{{" }}.Names{{ "}}" }}'
+  register: docker_ps
+  changed_when: false
+
+- name: Display running Docker containers
+  debug:
+    msg: "Running containers: {{ docker_ps.stdout_lines }}"
+
+- name: Remove deprecated ip_conntrack_max from sysctl files
+  lineinfile:
+    path: "{{ item }}"
+    regexp: 'net\.ipv4\.netfilter\.ip_conntrack_max'
+    state: absent
+  loop:
+    - /etc/sysctl.conf
+    - /etc/sysctl.d/99-sysctl.conf
+  failed_when: false
+
+- name: Enable IP forwarding (persistent)
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: yes
+    state: present
+    reload: yes

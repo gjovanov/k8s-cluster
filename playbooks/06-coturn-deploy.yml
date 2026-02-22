@@ -1,0 +1,9 @@
+---
+# =============================================================================
+# Phase 6: COTURN Deployment - Deploy to K8s with hostNetwork
+# =============================================================================
+- name: "Phase 6: COTURN Deployment"
+  hosts: k8s_master
+  become: yes
+  roles:
+    - coturn

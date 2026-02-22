@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# Role: vm-provision
+# Download cloud image, create VMs with cloud-init, wait for SSH
+# =============================================================================
+
+- name: Generate SSH keypair for VM access
+  openssh_keypair:
+    path: "{{ ssh_key_path }}"
+    type: ed25519
+    comment: "k8s-cluster-vm-access"
+    force: no
+  delegate_to: localhost
+  become: no
+
+- name: Read SSH public key
+  slurp:
+    src: "{{ ssh_pubkey_path }}"
+  register: ssh_pubkey_content
+  delegate_to: localhost
+  become: no
+
+- name: Ensure images directory exists
+  file:
+    path: "{{ vm_images_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Check if cloud image already exists
+  stat:
+    path: "{{ cloud_image_path }}"
+  register: cloud_image_stat
+
+- name: Download Ubuntu 22.04 cloud image
+  get_url:
+    url: "{{ cloud_image_url }}"
+    dest: "{{ cloud_image_path }}"
+    mode: '0644'
+  when: not cloud_image_stat.stat.exists
+
+- name: Provision each VM
+  include_tasks: create-vm.yml
+  loop: "{{ vms }}"
+  loop_control:
+    loop_var: vm
+
+- name: Wait for SSH connectivity on all VMs
+  wait_for:
+    host: "{{ item.ip }}"
+    port: 22
+    timeout: 300
+    delay: 10
+  loop: "{{ vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Add VMs to SSH known_hosts
+  shell: |
+    ssh-keyscan -H {{ item.ip }} >> ~/.ssh/known_hosts 2>/dev/null
+  loop: "{{ vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false
+  become: no
+
+- name: Verify inter-VM and internet connectivity
+  include_tasks: verify-connectivity.yml

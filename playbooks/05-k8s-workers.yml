@@ -1,0 +1,55 @@
+---
+# =============================================================================
+# Phase 5: K8s Workers Join - kubeadm join, label nodes
+# =============================================================================
+
+# Ensure join command is available (supports running this phase independently)
+- name: "Phase 5: Generate join command"
+  hosts: k8s_master
+  become: yes
+  tasks:
+    - name: Generate kubeadm join command
+      command: kubeadm token create --print-join-command --ttl 2h
+      register: join_command_raw
+      changed_when: false
+
+    - name: Set join command fact
+      set_fact:
+        k8s_join_command: "{{ join_command_raw.stdout }}"
+
+- name: "Phase 5: K8s Workers Join"
+  hosts: k8s_workers
+  become: yes
+  serial: 1
+  roles:
+    - k8s-worker
+
+- name: "Phase 5: Verify cluster"
+  hosts: k8s_master
+  become: yes
+  tasks:
+    - name: Show all nodes
+      command: kubectl get nodes -o wide
+      environment:
+        KUBECONFIG: /home/{{ vm_user }}/.kube/config
+      register: all_nodes
+      changed_when: false
+      become_user: "{{ vm_user }}"
+      become: yes
+
+    - name: Display cluster nodes
+      debug:
+        var: all_nodes.stdout_lines
+
+    - name: Show all pods
+      command: kubectl get pods -A -o wide
+      environment:
+        KUBECONFIG: /home/{{ vm_user }}/.kube/config
+      register: all_pods
+      changed_when: false
+      become_user: "{{ vm_user }}"
+      become: yes
+
+    - name: Display all pods
+      debug:
+        var: all_pods.stdout_lines

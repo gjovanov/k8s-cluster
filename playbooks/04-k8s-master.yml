@@ -1,0 +1,9 @@
+---
+# =============================================================================
+# Phase 4: K8s Master Bootstrap - kubeadm init + Cilium
+# =============================================================================
+- name: "Phase 4: K8s Master Bootstrap"
+  hosts: k8s_master
+  become: yes
+  roles:
+    - k8s-master

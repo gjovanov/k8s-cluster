@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# Master Playbook: Run all phases in order
+# Usage: ansible-playbook playbooks/site.yml
+# =============================================================================
+
+- name: "=== Phase 1: Host Setup ==="
+  import_playbook: 01-host-setup.yml
+
+- name: "=== Phase 2: VM Provisioning ==="
+  import_playbook: 02-vm-provision.yml
+
+- name: "=== Phase 3: K8s Prerequisites ==="
+  import_playbook: 03-k8s-common.yml
+
+- name: "=== Phase 4: K8s Master Bootstrap ==="
+  import_playbook: 04-k8s-master.yml
+
+- name: "=== Phase 5: K8s Workers Join ==="
+  import_playbook: 05-k8s-workers.yml
+
+- name: "=== Phase 6: COTURN Deployment ==="
+  import_playbook: 06-coturn-deploy.yml
+
+- name: "=== Phase 7: Host Networking ==="
+  import_playbook: 07-host-networking.yml
+
+- name: "=== Phase 8: Host kubectl ==="
+  import_playbook: 08-host-kubectl.yml
+
+- name: "=== Phase 9: SNI Proxy (TURNS on 443) ==="
+  import_playbook: 09-sni-proxy.yml
+
+- name: "=== Phase 10: Monitoring Stack ==="
+  import_playbook: 10-monitoring.yml

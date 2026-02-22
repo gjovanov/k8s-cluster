@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang=en>
+<head>
+<meta charset=utf-8>
+<title>COTURN Test (ephemeral credentials)</title>
+<style>
+body { font-family: monospace; padding: 20px; }
+input, select { margin: 4px 0; }
+#log { white-space: pre-wrap; background: #111; color: #0f0; padding: 10px; max-height: 400px; overflow-y: auto; font-size: 13px; }
+.ok { color: #0f0; } .err { color: #f44; } .info { color: #4af; }
+</style>
+</head>
+<body>
+<h3>COTURN Connectivity Test</h3>
+
+<label>TURN URLs (one per line):</label><br/>
+<textarea id="urls" rows="8" style="width: 500px">turn:94.130.141.98:3478
+turn:94.130.141.98:3478?transport=tcp
+turn:94.130.141.74:3478
+turn:94.130.141.74:3478?transport=tcp
+turns:coturn.roomler.live:5349?transport=tcp
+turns:coturn.roomler.live:443?transport=tcp</textarea>
+<br/>
+<label>Shared Secret:</label><br/>
+<input id="secret" type="text" value="" placeholder="Paste COTURN_AUTH_SECRET from .env" style="width: 500px"/>
+<br/>
+<label>TTL (seconds):</label>
+<input id="ttl" type="number" value="86400" style="width: 100px"/>
+<br/>
+<em>Generated credentials:</em><br/>
+<input id="username" type="text" readonly style="width: 500px; background: #eee"/>
+<br/>
+<input id="credential" type="text" readonly style="width: 500px; background: #eee"/>
+<br/><br/>
+<button onclick="runTest()" style="padding: 8px 20px; font-size: 14px;">Test All URLs</button>
+<button onclick="document.getElementById('log').textContent=''" style="padding: 8px 12px;">Clear Log</button>
+<br/><br/>
+<div id="log"></div>
+
+<script>
+const log = (msg, cls='info') => {
+	const el = document.getElementById('log');
+	const span = document.createElement('span');
+	span.className = cls;
+	span.textContent = new Date().toISOString().substr(11,12) + ' ' + msg + '\n';
+	el.appendChild(span);
+	el.scrollTop = el.scrollHeight;
+};
+
+async function generateTurnCredentials(secret, ttl) {
+	const expiry = Math.floor(Date.now() / 1000) + ttl;
+	const username = expiry + ':coturntest';
+	const enc = new TextEncoder();
+	const key = await crypto.subtle.importKey(
+		'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+	);
+	const sig = await crypto.subtle.sign('HMAC', key, enc.encode(username));
+	const credential = btoa(String.fromCharCode(...new Uint8Array(sig)));
+	return { username, credential };
+}
+
+function testSingleURL(url, username, credential, timeout) {
+	return new Promise(function(resolve) {
+		const timer = setTimeout(() => {
+			if (done) return;
+			done = true;
+			log(url + ' => TIMEOUT (no relay candidate in ' + timeout + 'ms)', 'err');
+			pc.close();
+			resolve(false);
+		}, timeout);
+
+		let done = false;
+		let candidateCount = 0;
+
+		const pc = new RTCPeerConnection({
+			iceServers: [{ urls: url, username, credential }],
+			iceTransportPolicy: 'relay'
+		});
+
+		pc.onicegatheringstatechange = () => {
+			log(url + ' gathering: ' + pc.iceGatheringState);
+			if (pc.iceGatheringState === 'complete' && !done) {
+				if (candidateCount === 0) {
+					done = true;
+					clearTimeout(timer);
+					log(url + ' => FAIL (gathering complete, 0 relay candidates)', 'err');
+					pc.close();
+					resolve(false);
+				}
+			}
+		};
+
+		pc.onicecandidate = (ice) => {
+			if (done) return;
+			if (!ice.candidate) {
+				log(url + ' => end of candidates (found ' + candidateCount + ')', candidateCount > 0 ? 'ok' : 'err');
+				return;
+			}
+			const c = ice.candidate.candidate;
+			log(url + ' candidate: ' + c, c.indexOf('typ relay') > -1 ? 'ok' : 'info');
+			if (c.indexOf('typ relay') > -1) {
+				candidateCount++;
+				if (!done) {
+					done = true;
+					clearTimeout(timer);
+					log(url + ' => OK (relay candidate found!)', 'ok');
+					pc.close();
+					resolve(true);
+				}
+			}
+		};
+
+		pc.createDataChannel('test');
+		pc.createOffer().then(sdp => {
+			log(url + ' offer created, setting local description...');
+			return pc.setLocalDescription(sdp);
+		}).then(() => {
+			log(url + ' ICE gathering started...');
+		}).catch(err => {
+			if (!done) {
+				done = true;
+				clearTimeout(timer);
+				log(url + ' => ERROR: ' + err.message, 'err');
+				pc.close();
+				resolve(false);
+			}
+		});
+	});
+}
+
+async function runTest() {
+	const urlsText = document.getElementById('urls').value.trim();
+	const urls = urlsText.split('\n').map(u => u.trim()).filter(u => u);
+	const secret = document.getElementById('secret').value;
+	const ttl = parseInt(document.getElementById('ttl').value) || 86400;
+
+	log('=== Starting COTURN test ===');
+	log('Generating ephemeral credentials...');
+
+	const { username, credential } = await generateTurnCredentials(secret, ttl);
+	document.getElementById('username').value = username;
+	document.getElementById('credential').value = credential;
+	log('Username: ' + username);
+	log('Credential: ' + credential);
+	log('Testing ' + urls.length + ' URL(s) with 10s timeout each...');
+	log('iceTransportPolicy: relay (force relay-only candidates)');
+	log('');
+
+	let anyOk = false;
+	for (const url of urls) {
+		log('--- Testing: ' + url + ' ---');
+		const ok = await testSingleURL(url, username, credential, 10000);
+		if (ok) anyOk = true;
+		log('');
+	}
+
+	log('=== Result: ' + (anyOk ? 'TURN server is ACTIVE' : 'TURN server NOT reachable') + ' ===', anyOk ? 'ok' : 'err');
+}
+</script>
+</body>
+</html>

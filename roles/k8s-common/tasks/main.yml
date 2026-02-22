@@ -1,0 +1,181 @@
+---
+# =============================================================================
+# Role: k8s-common
+# K8s prerequisites on all VMs: swap, modules, sysctl, containerd, kubeadm
+# =============================================================================
+
+# --- Swap ---
+- name: Disable swap
+  command: swapoff -a
+  changed_when: false
+
+- name: Remove swap from fstab
+  lineinfile:
+    path: /etc/fstab
+    regexp: '\sswap\s'
+    state: absent
+
+# --- Kernel modules ---
+- name: Load required kernel modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+
+- name: Persist kernel modules
+  copy:
+    content: |
+      overlay
+      br_netfilter
+    dest: /etc/modules-load.d/k8s.conf
+    mode: '0644'
+
+# --- Sysctl ---
+- name: Set required sysctl parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: yes
+    state: present
+  loop:
+    - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+    - { key: 'net.ipv4.ip_forward', value: '1' }
+
+# --- Containerd ---
+- name: Update apt cache
+  apt:
+    update_cache: yes
+  retries: 3
+  delay: 5
+  register: apt_update
+  until: apt_update is success
+
+- name: Install containerd prerequisites
+  apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+
+- name: Add Docker GPG key
+  shell: |
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+  args:
+    creates: /etc/apt/keyrings/docker.asc
+
+- name: Add Docker repository
+  shell: |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/docker.list
+
+- name: Update apt cache after adding Docker repo
+  apt:
+    update_cache: yes
+
+- name: Install containerd
+  apt:
+    name: containerd.io
+    state: present
+
+- name: Create containerd config directory
+  file:
+    path: /etc/containerd
+    state: directory
+    mode: '0755'
+
+- name: Generate default containerd config (always overwrite to remove disabled CRI)
+  shell: containerd config default > /etc/containerd/config.toml
+  notify: Restart containerd
+  changed_when: true
+
+- name: Set SystemdCgroup = true in containerd config
+  replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: Restart containerd
+
+- name: Flush handlers to restart containerd now
+  meta: flush_handlers
+
+- name: Ensure containerd is enabled and running
+  systemd:
+    name: containerd
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for containerd CRI to be ready
+  command: crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock version
+  register: cri_check
+  retries: 10
+  delay: 3
+  until: cri_check.rc == 0
+  changed_when: false
+
+# --- Kubernetes packages ---
+- name: Add Kubernetes GPG key
+  shell: |
+    curl -fsSL {{ k8s_apt_key_url }} | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
+  args:
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Add Kubernetes repository
+  copy:
+    content: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] {{ k8s_apt_repo }} /\n"
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    mode: '0644'
+
+- name: Update apt cache after adding K8s repo
+  apt:
+    update_cache: yes
+
+- name: Install kubeadm, kubelet, kubectl
+  apt:
+    name:
+      - kubeadm
+      - kubelet
+      - kubectl
+    state: present
+
+- name: Hold Kubernetes packages at current version
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubeadm
+    - kubelet
+    - kubectl
+
+- name: Enable kubelet service
+  systemd:
+    name: kubelet
+    enabled: yes
+
+# --- Helm ---
+- name: Check if Helm is installed
+  command: helm version --short
+  register: helm_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Helm
+  shell: |
+    curl -fsSL {{ helm_install_script }} | bash
+  when: helm_check.rc != 0
+
+# --- /etc/hosts for internal resolution ---
+- name: Set /etc/hosts entries for cluster nodes
+  blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} K8S CLUSTER HOSTS"
+    block: "{{ lookup('template', 'etc-hosts.j2') }}"

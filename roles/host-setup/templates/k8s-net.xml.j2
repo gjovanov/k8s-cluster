@@ -1,0 +1,18 @@
+<network>
+  <name>{{ libvirt_network_name }}</name>
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='{{ libvirt_bridge_name }}' stp='on' delay='0'/>
+  <domain name='{{ libvirt_network_domain }}' localOnly='yes'/>
+  <ip address='{{ libvirt_network_gateway }}' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='{{ libvirt_network_dhcp_start }}' end='{{ libvirt_network_dhcp_end }}'/>
+{% for vm in vms %}
+      <host mac='{{ vm.mac }}' name='{{ vm.name }}' ip='{{ vm.ip }}'/>
+{% endfor %}
+    </dhcp>
+  </ip>
+</network>

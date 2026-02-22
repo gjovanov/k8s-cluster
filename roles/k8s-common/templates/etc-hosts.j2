@@ -1,0 +1,3 @@
+{% for vm in vms %}
+{{ vm.ip }}  {{ vm.name }} {{ vm.name }}.{{ libvirt_network_domain }}
+{% endfor %}

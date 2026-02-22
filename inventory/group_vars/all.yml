@@ -1,0 +1,161 @@
+---
+# =============================================================================
+# Host & Network
+# =============================================================================
+host_user: "gjovanov"
+host_public_ip_primary: "94.130.141.98"
+host_public_ip_secondary: "94.130.141.74"
+host_mac: "30:9c:23:02:78:65"
+host_interface: "eth0"
+
+# =============================================================================
+# Libvirt NAT Network
+# =============================================================================
+libvirt_network_name: "k8s-net"
+libvirt_bridge_name: "virbr1"
+libvirt_network_cidr: "10.10.10.0/24"
+libvirt_network_gateway: "10.10.10.1"
+libvirt_network_dhcp_start: "10.10.10.10"
+libvirt_network_dhcp_end: "10.10.10.50"
+libvirt_network_domain: "k8s.local"
+
+# =============================================================================
+# VM Settings
+# =============================================================================
+cloud_image_url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+cloud_image_path: "/var/lib/libvirt/images/jammy-server-cloudimg-amd64.img"
+vm_images_dir: "/var/lib/libvirt/images"
+vm_user: "ubuntu"
+ssh_key_path: "{{ playbook_dir }}/../files/ssh/k8s_ed25519"
+ssh_pubkey_path: "{{ playbook_dir }}/../files/ssh/k8s_ed25519.pub"
+
+vms:
+  - name: k8s-master
+    vcpus: 2
+    memory_mb: 4096
+    disk_gb: 40
+    ip: "10.10.10.10"
+    mac: "52:54:00:a8:00:10"
+  - name: k8s-worker1
+    vcpus: 4
+    memory_mb: 8192
+    disk_gb: 60
+    ip: "10.10.10.11"
+    mac: "52:54:00:a8:00:11"
+  - name: k8s-worker2
+    vcpus: 4
+    memory_mb: 8192
+    disk_gb: 60
+    ip: "10.10.10.12"
+    mac: "52:54:00:a8:00:12"
+
+# =============================================================================
+# Kubernetes
+# =============================================================================
+k8s_version: "1.29"
+k8s_apt_key_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/Release.key"
+k8s_apt_repo: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_version }}/deb/"
+k8s_pod_cidr: "10.244.0.0/16"
+k8s_service_cidr: "10.96.0.0/12"
+k8s_master_ip: "10.10.10.10"
+k8s_master_hostname: "k8s-master"
+
+# Containerd
+containerd_version: "1.7.*"
+
+# Cilium
+cilium_version: "1.15.1"
+cilium_helm_repo: "https://helm.cilium.io/"
+
+# Helm
+helm_install_script: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
+
+# =============================================================================
+# COTURN
+# =============================================================================
+coturn_realm: "roomler.live"
+coturn_auth_secret: "{{ lookup('env', 'COTURN_AUTH_SECRET') }}"
+coturn_image: "instrumentisto/coturn:latest"
+coturn_min_port: 49152
+coturn_max_port: 50175
+coturn_listening_port: 3478
+coturn_tls_port: 5349
+coturn_alt_tls_port: 443
+coturn_namespace: "coturn"
+
+# TLS cert paths on host
+coturn_tls_cert_host_path: "/home/gjovanov/cert/roomler.live.fullchain.pem"
+coturn_tls_key_host_path: "/home/gjovanov/cert/roomler.live.key.pem"
+
+# COTURN workers mapping
+coturn_workers:
+  - name: coturn-worker1
+    node: k8s-worker1
+    node_ip: "10.10.10.11"
+    public_ip: "94.130.141.98"
+  - name: coturn-worker2
+    node: k8s-worker2
+    node_ip: "10.10.10.12"
+    public_ip: "94.130.141.74"
+
+# =============================================================================
+# iptables Port Forwarding
+# =============================================================================
+iptables_chain_name: "COTURN_DNAT"
+iptables_snat_chain_name: "COTURN_SNAT"
+coturn_dnat_rules:
+  - public_ip: "94.130.141.98"
+    dest_ip: "10.10.10.11"
+    protocols: ["tcp", "udp"]
+    ports:
+      - "3478"
+      - "5349"
+    port_ranges:
+      - "49152:50175"
+  - public_ip: "94.130.141.74"
+    dest_ip: "10.10.10.12"
+    protocols: ["tcp", "udp"]
+    ports:
+      - "3478"
+      - "5349"
+    port_ranges:
+      - "49152:50175"
+
+# =============================================================================
+# SNI Proxy (TURNS on port 443 for IP1)
+# =============================================================================
+coturn_sni_hostname: "coturn.roomler.live"
+sni_proxy_listen_port: 4443
+sni_proxy_public_ip: "94.130.141.98"
+sni_proxy_coturn_backend: "10.10.10.11:443"
+sni_proxy_docker_container: "nginx"
+
+# =============================================================================
+# Monitoring
+# =============================================================================
+monitoring_namespace: "monitoring"
+monitoring_helm_release: "kube-prom"
+monitoring_helm_chart: "kube-prometheus-stack"
+monitoring_helm_version: "65.1.0"
+grafana_admin_password: "{{ lookup('env', 'GRAFANA_ADMIN_PASSWORD') }}"
+
+# SendGrid email alerts
+alertmanager_smtp_host: "smtp.sendgrid.net:587"
+alertmanager_smtp_from: "alerts@roomler.live"
+alertmanager_smtp_auth_username: "apikey"
+alertmanager_smtp_auth_password: "{{ lookup('env', 'ALERTMANAGER_SMTP_PASSWORD') }}"
+alertmanager_email_to: "goran.jovanov@gmail.com"
+
+# Resource budgets (~1.5GB total)
+prometheus_memory_limit: "768Mi"
+prometheus_retention: "7d"
+prometheus_storage_size: "10Gi"
+grafana_memory_limit: "256Mi"
+alertmanager_memory_limit: "128Mi"
+
+# =============================================================================
+# Paths
+# =============================================================================
+project_dir: "/home/gjovanov/k8s-cluster"
+kubeconfig_local_path: "/home/gjovanov/k8s-cluster/files/kubeconfig"
+iptables_backup_path: "/home/gjovanov/k8s-cluster/backup/iptables-backup.rules"

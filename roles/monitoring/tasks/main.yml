@@ -1,0 +1,127 @@
+---
+# =============================================================================
+# Role: monitoring
+# Deploy kube-prometheus-stack (Prometheus + Grafana + AlertManager)
+# =============================================================================
+
+# --- Add Helm repo ---
+- name: Add prometheus-community Helm repo
+  command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  register: helm_repo_add
+  changed_when: "'has been added' in helm_repo_add.stdout"
+  failed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Update Helm repos
+  command: helm repo update
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  changed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+# --- Create namespace ---
+- name: Create monitoring namespace
+  command: kubectl create namespace {{ monitoring_namespace }}
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  register: ns_create
+  changed_when: ns_create.rc == 0
+  failed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+# --- Deploy Helm values ---
+- name: Generate monitoring Helm values
+  template:
+    src: monitoring-values.yml.j2
+    dest: /tmp/monitoring-values.yml
+    mode: '0644'
+
+# --- Install/Upgrade kube-prometheus-stack ---
+- name: Install kube-prometheus-stack via Helm
+  command: >
+    helm upgrade --install {{ monitoring_helm_release }}
+    prometheus-community/{{ monitoring_helm_chart }}
+    --namespace {{ monitoring_namespace }}
+    --version {{ monitoring_helm_version }}
+    --values /tmp/monitoring-values.yml
+    --timeout 10m
+    --wait
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  become_user: "{{ vm_user }}"
+  become: yes
+  register: helm_install
+  retries: 2
+  delay: 30
+  until: helm_install.rc == 0
+
+- name: Display Helm install output
+  debug:
+    var: helm_install.stdout_lines
+
+# --- Deploy COTURN Grafana dashboard ---
+- name: Generate COTURN dashboard ConfigMap
+  template:
+    src: coturn-dashboard.json.j2
+    dest: /tmp/coturn-dashboard-configmap.yml
+    mode: '0644'
+
+- name: Apply COTURN dashboard ConfigMap
+  command: kubectl apply -f /tmp/coturn-dashboard-configmap.yml
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  changed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+# --- Wait for pods ---
+- name: Wait for monitoring pods to be ready
+  command: >
+    kubectl wait --for=condition=ready pod
+    -l app.kubernetes.io/instance={{ monitoring_helm_release }}
+    -n {{ monitoring_namespace }}
+    --timeout=300s
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  retries: 3
+  delay: 30
+  register: monitoring_wait
+  until: monitoring_wait.rc == 0
+  become_user: "{{ vm_user }}"
+  become: yes
+
+# --- Verify ---
+- name: Get monitoring pods
+  command: kubectl get pods -n {{ monitoring_namespace }} -o wide
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  register: monitoring_pods
+  changed_when: false
+  become_user: "{{ vm_user }}"
+  become: yes
+
+- name: Display monitoring pods
+  debug:
+    var: monitoring_pods.stdout_lines
+
+- name: Clean up temporary files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/monitoring-values.yml
+    - /tmp/coturn-dashboard-configmap.yml
+
+- name: Display Grafana access info
+  debug:
+    msg: |
+      Grafana is available via NodePort 30300.
+      Access via SSH tunnel:
+        ssh -L 3000:{{ k8s_master_ip }}:30300 -i files/ssh/k8s_ed25519 ubuntu@{{ k8s_master_ip }}
+      Then browse: http://localhost:3000
+      Login: admin / {{ grafana_admin_password }}

@@ -1,0 +1,118 @@
+---
+# =============================================================================
+# Role: sni-proxy
+# SNI-based multiplexer on IP1 (94.130.141.98) for TURNS on port 443
+# Also updates nginx2 upstream for IP2
+# =============================================================================
+
+# --- Install host nginx (stream module) ---
+- name: Install nginx with stream module
+  apt:
+    name:
+      - nginx
+      - libnginx-mod-stream
+    state: present
+
+# Disable default site (port 80 is used by Docker nginx container)
+- name: Remove default nginx site
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload host nginx
+
+# --- Get Docker nginx container IP ---
+- name: Get Docker nginx container IP
+  shell: >
+    docker inspect {{ sni_proxy_docker_container }}
+    --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}{% endraw %}'
+    | awk '{print $1}'
+  register: docker_nginx_ip
+  changed_when: false
+
+- name: Display Docker nginx IP
+  debug:
+    msg: "Docker nginx container IP: {{ docker_nginx_ip.stdout }}"
+
+# --- Deploy SNI proxy stream config ---
+- name: Deploy SNI proxy stream config
+  template:
+    src: sni-proxy-stream.conf.j2
+    dest: /etc/nginx/modules-enabled/99-sni-proxy-stream.conf
+    mode: '0644'
+  notify: Reload host nginx
+
+# --- Deploy Docker nginx upstream include ---
+- name: Write Docker nginx upstream include
+  copy:
+    content: |
+      upstream docker_nginx_ip1 { server {{ docker_nginx_ip.stdout }}:443; }
+    dest: /etc/nginx/sni-upstream-docker-nginx.conf
+    mode: '0644'
+  notify: Reload host nginx
+
+# --- Deploy Docker IP updater script ---
+- name: Deploy Docker IP updater script
+  template:
+    src: sni-proxy-update-docker-ips.sh.j2
+    dest: /usr/local/bin/sni-proxy-update-docker-ips.sh
+    mode: '0755'
+
+# --- Deploy systemd service for Docker IP updater ---
+- name: Deploy Docker IP updater systemd service
+  template:
+    src: sni-proxy-update-docker-ips.service.j2
+    dest: /etc/systemd/system/sni-proxy-update-docker-ips.service
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Enable Docker IP updater service
+  systemd:
+    name: sni-proxy-update-docker-ips
+    enabled: yes
+    daemon_reload: yes
+
+# --- Add ExecStartPost to Docker service for IP updates ---
+- name: Ensure Docker override directory exists
+  file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    mode: '0755'
+
+- name: Check if Docker override conf exists
+  stat:
+    path: /etc/systemd/system/docker.service.d/coturn-iptables.conf
+  register: docker_override_conf
+
+- name: Add SNI proxy Docker IP update hook
+  lineinfile:
+    path: /etc/systemd/system/docker.service.d/coturn-iptables.conf
+    line: "ExecStartPost=/usr/local/bin/sni-proxy-update-docker-ips.sh"
+    insertafter: "ExecStartPost="
+  when: docker_override_conf.stat.exists
+  notify: Reload systemd
+
+# --- Ensure host nginx is running ---
+- name: Enable and start host nginx
+  systemd:
+    name: nginx
+    enabled: yes
+    state: started
+
+# --- Force handlers to run before verification ---
+- name: Flush handlers
+  meta: flush_handlers
+
+# --- Verify ---
+- name: Verify SNI proxy is listening
+  wait_for:
+    host: 127.0.0.1
+    port: "{{ sni_proxy_listen_port }}"
+    timeout: 10
+  register: sni_listen_check
+  failed_when: false
+
+- name: Display SNI proxy status
+  debug:
+    msg: >
+      SNI proxy on 127.0.0.1:{{ sni_proxy_listen_port }}
+      {{ 'is LISTENING' if sni_listen_check is success else 'is NOT listening (will work after iptables DNAT is applied)' }}

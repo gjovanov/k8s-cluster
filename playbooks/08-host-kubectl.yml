@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# Phase 8: Install kubectl on host and configure kubeconfig
+# =============================================================================
+- name: "Phase 8: Install kubectl on host"
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    k8s_version: "1.29"
+  tasks:
+    - name: Download kubectl binary
+      get_url:
+        url: "https://dl.k8s.io/release/v1.29.15/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+        force: no
+
+    - name: Create .kube directory for user
+      file:
+        path: "/home/{{ host_user }}/.kube"
+        state: directory
+        owner: "{{ host_user }}"
+        group: "{{ host_user }}"
+        mode: '0755'
+
+    - name: Check if kubeconfig exists from cluster setup
+      stat:
+        path: "{{ kubeconfig_local_path }}"
+      register: kubeconfig_stat
+
+    - name: Copy kubeconfig to user's .kube
+      copy:
+        src: "{{ kubeconfig_local_path }}"
+        dest: "/home/{{ host_user }}/.kube/config"
+        owner: "{{ host_user }}"
+        group: "{{ host_user }}"
+        mode: '0600'
+      when: kubeconfig_stat.stat.exists
+
+    - name: Verify kubectl can reach the cluster
+      command: kubectl get nodes
+      environment:
+        KUBECONFIG: "/home/{{ host_user }}/.kube/config"
+      register: kubectl_verify
+      changed_when: false
+      become_user: "{{ host_user }}"
+      become: yes
+
+    - name: Display cluster nodes
+      debug:
+        var: kubectl_verify.stdout_lines

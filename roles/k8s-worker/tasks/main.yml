@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# Role: k8s-worker
+# kubeadm join, label nodes
+# =============================================================================
+
+- name: Check if kubelet is already configured (node joined)
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf_check
+
+- name: Join worker to Kubernetes cluster
+  command: "{{ hostvars['k8s-master']['k8s_join_command'] }}"
+  when: not kubelet_conf_check.stat.exists
+  register: join_result
+
+- name: Display join result
+  debug:
+    var: join_result.stdout_lines
+  when: join_result is changed
+
+- name: Wait for kubelet to be ready
+  command: systemctl is-active kubelet
+  register: kubelet_status
+  retries: 12
+  delay: 10
+  until: kubelet_status.stdout == "active"
+  changed_when: false
+
+# --- Label nodes (run from master) ---
+- name: Label worker node with coturn=true
+  command: >
+    kubectl label node {{ inventory_hostname }}
+    coturn=true
+    --overwrite
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  delegate_to: k8s-master
+  become_user: "{{ vm_user }}"
+  become: yes
+  changed_when: false
+
+- name: Label worker node with role
+  command: >
+    kubectl label node {{ inventory_hostname }}
+    node-role.kubernetes.io/worker=worker
+    --overwrite
+  environment:
+    KUBECONFIG: /home/{{ vm_user }}/.kube/config
+  delegate_to: k8s-master
+  become_user: "{{ vm_user }}"
+  become: yes
+  changed_when: false

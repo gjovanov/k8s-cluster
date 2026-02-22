@@ -1,0 +1,41 @@
+#!/bin/bash
+# =============================================================================
+# Update Docker nginx container IP in SNI proxy upstream config
+# Called on Docker restart and by systemd oneshot
+# =============================================================================
+
+set -e
+
+CONTAINER="{{ sni_proxy_docker_container }}"
+UPSTREAM_FILE="/etc/nginx/sni-upstream-docker-nginx.conf"
+
+# Wait for container to be running (up to 30s)
+for i in $(seq 1 30); do
+    if docker inspect -f '{% raw %}{{.State.Running}}{% endraw %}' "$CONTAINER" 2>/dev/null | grep -q true; then
+        break
+    fi
+    sleep 1
+done
+
+# Get container IP (first network)
+DOCKER_IP=$(docker inspect "$CONTAINER" \
+    --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}{% endraw %}' \
+    | awk '{print $1}')
+
+if [ -z "$DOCKER_IP" ]; then
+    echo "ERROR: Could not get IP for container $CONTAINER"
+    exit 1
+fi
+
+# Write upstream config
+cat > "$UPSTREAM_FILE" <<EOF
+upstream docker_nginx_ip1 { server ${DOCKER_IP}:443; }
+EOF
+
+echo "Updated $UPSTREAM_FILE with Docker nginx IP: $DOCKER_IP"
+
+# Reload host nginx if running
+if systemctl is-active --quiet nginx; then
+    nginx -t && nginx -s reload
+    echo "Host nginx reloaded"
+fi

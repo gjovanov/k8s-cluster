@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# Phase 7: Host Networking - iptables DNAT/SNAT rules
+# =============================================================================
+- name: "Phase 7: Host iptables Port Forwarding"
+  hosts: localhost
+  connection: local
+  become: yes
+  roles:
+    - host-networking

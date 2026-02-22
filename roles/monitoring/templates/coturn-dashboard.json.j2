@@ -1,0 +1,209 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coturn-grafana-dashboard
+  namespace: {{ monitoring_namespace }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  coturn-dashboard.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "title": "COTURN Pod Status",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "kube_deployment_status_replicas_available{namespace=\"coturn\", deployment=~\"coturn-worker.*\"}",
+              "legendFormat": "{% raw %}{{ deployment }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "green", "value": 1 }
+                ]
+              },
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ]
+            }
+          }
+        },
+        {
+          "title": "COTURN Pod Restarts",
+          "type": "timeseries",
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "increase(kube_pod_container_status_restarts_total{namespace=\"coturn\"}[1h])",
+              "legendFormat": "{% raw %}{{ pod }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "title": "COTURN CPU Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [
+            {
+              "expr": "rate(container_cpu_usage_seconds_total{namespace=\"coturn\", container=\"coturn\"}[5m])",
+              "legendFormat": "{% raw %}{{ pod }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "unit": "short"
+            }
+          }
+        },
+        {
+          "title": "COTURN Memory Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            {
+              "expr": "container_memory_working_set_bytes{namespace=\"coturn\", container=\"coturn\"}",
+              "legendFormat": "{% raw %}{{ pod }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "unit": "bytes"
+            }
+          }
+        },
+        {
+          "title": "Network RX (Worker Nodes)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "targets": [
+            {
+              "expr": "rate(node_network_receive_bytes_total{device!~\"lo|veth.*|cali.*|cilium.*\"}[5m])",
+              "legendFormat": "{% raw %}{{ instance }} - {{ device }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "unit": "Bps"
+            }
+          }
+        },
+        {
+          "title": "Network TX (Worker Nodes)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "targets": [
+            {
+              "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|cali.*|cilium.*\"}[5m])",
+              "legendFormat": "{% raw %}{{ instance }} - {{ device }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "unit": "Bps"
+            }
+          }
+        },
+        {
+          "title": "Node CPU Usage",
+          "type": "gauge",
+          "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
+          "targets": [
+            {
+              "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+              "legendFormat": "{% raw %}{{ instance }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 60 },
+                  { "color": "red", "value": 85 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Node Memory Usage",
+          "type": "gauge",
+          "gridPos": { "h": 6, "w": 8, "x": 8, "y": 20 },
+          "targets": [
+            {
+              "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+              "legendFormat": "{% raw %}{{ instance }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 90 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Node Disk Usage",
+          "type": "gauge",
+          "gridPos": { "h": 6, "w": 8, "x": 16, "y": 20 },
+          "targets": [
+            {
+              "expr": "(1 - node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\", mountpoint=\"/\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\", mountpoint=\"/\"}) * 100",
+              "legendFormat": "{% raw %}{{ instance }}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 85 }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["coturn", "k8s"],
+      "templating": { "list": [] },
+      "time": { "from": "now-6h", "to": "now" },
+      "title": "COTURN & Cluster Health",
+      "uid": "coturn-cluster-health"
+    }
