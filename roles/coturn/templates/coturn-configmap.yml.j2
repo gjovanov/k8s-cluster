@@ -33,15 +33,14 @@ data:
 
     # Security
     fingerprint
-    lt-cred-mech
-    user={{ coturn_turn_username }}:{{ coturn_turn_credential_key }}
+    use-auth-secret
+    static-auth-secret={{ coturn_auth_secret }}
     no-software-attribute
 
     # Disable multicast peers
     no-multicast-peers
 
     # Performance
-    proc-quota-size=8000
     max-bps=0
     total-quota=0
     stale-nonce=600

@@ -2,12 +2,13 @@
 <html lang=en>
 <head>
 <meta charset=utf-8>
-<title>COTURN Test (ephemeral credentials)</title>
+<title>COTURN Test</title>
 <style>
 body { font-family: monospace; padding: 20px; }
-input, select { margin: 4px 0; }
+input, select, textarea { margin: 4px 0; }
 #log { white-space: pre-wrap; background: #111; color: #0f0; padding: 10px; max-height: 400px; overflow-y: auto; font-size: 13px; }
 .ok { color: #0f0; } .err { color: #f44; } .info { color: #4af; }
+fieldset { margin: 10px 0; padding: 10px; }
 </style>
 </head>
 <body>
@@ -18,9 +19,24 @@ input, select { margin: 4px 0; }
 turn:94.130.141.98:3478?transport=tcp
 turn:94.130.141.74:3478
 turn:94.130.141.74:3478?transport=tcp
-turns:coturn.roomler.live:5349?transport=tcp
-turns:coturn.roomler.live:443?transport=tcp</textarea>
+turns:coturn.roomler.live:5349?transport=tcp</textarea>
 <br/>
+
+<fieldset>
+<legend>Auth Mode:</legend>
+<label><input type="radio" name="authMode" value="longterm" checked onchange="toggleAuth()"> Long-term credentials (lt-cred-mech)</label><br/>
+<label><input type="radio" name="authMode" value="ephemeral" onchange="toggleAuth()"> Ephemeral credentials (use-auth-secret)</label>
+</fieldset>
+
+<div id="longterm-fields">
+<label>Username:</label><br/>
+<input id="lt-username" type="text" value="hammer" style="width: 300px"/>
+<br/>
+<label>Password:</label><br/>
+<input id="lt-password" type="password" value="" placeholder="TURN password" style="width: 300px"/>
+</div>
+
+<div id="ephemeral-fields" style="display:none">
 <label>Shared Secret:</label><br/>
 <input id="secret" type="text" value="" placeholder="Paste COTURN_AUTH_SECRET from .env" style="width: 500px"/>
 <br/>
@@ -28,16 +44,24 @@ turns:coturn.roomler.live:443?transport=tcp</textarea>
 <input id="ttl" type="number" value="86400" style="width: 100px"/>
 <br/>
 <em>Generated credentials:</em><br/>
-<input id="username" type="text" readonly style="width: 500px; background: #eee"/>
+<input id="gen-username" type="text" readonly style="width: 500px; background: #eee"/>
 <br/>
-<input id="credential" type="text" readonly style="width: 500px; background: #eee"/>
-<br/><br/>
+<input id="gen-credential" type="text" readonly style="width: 500px; background: #eee"/>
+</div>
+
+<br/>
 <button onclick="runTest()" style="padding: 8px 20px; font-size: 14px;">Test All URLs</button>
 <button onclick="document.getElementById('log').textContent=''" style="padding: 8px 12px;">Clear Log</button>
 <br/><br/>
 <div id="log"></div>
 
 <script>
+function toggleAuth() {
+	const mode = document.querySelector('input[name="authMode"]:checked').value;
+	document.getElementById('longterm-fields').style.display = mode === 'longterm' ? '' : 'none';
+	document.getElementById('ephemeral-fields').style.display = mode === 'ephemeral' ? '' : 'none';
+}
+
 const log = (msg, cls='info') => {
 	const el = document.getElementById('log');
 	const span = document.createElement('span');
@@ -131,17 +155,38 @@ function testSingleURL(url, username, credential, timeout) {
 async function runTest() {
 	const urlsText = document.getElementById('urls').value.trim();
 	const urls = urlsText.split('\n').map(u => u.trim()).filter(u => u);
-	const secret = document.getElementById('secret').value;
-	const ttl = parseInt(document.getElementById('ttl').value) || 86400;
+	const mode = document.querySelector('input[name="authMode"]:checked').value;
+
+	let username, credential;
 
 	log('=== Starting COTURN test ===');
-	log('Generating ephemeral credentials...');
 
-	const { username, credential } = await generateTurnCredentials(secret, ttl);
-	document.getElementById('username').value = username;
-	document.getElementById('credential').value = credential;
-	log('Username: ' + username);
-	log('Credential: ' + credential);
+	if (mode === 'longterm') {
+		username = document.getElementById('lt-username').value;
+		credential = document.getElementById('lt-password').value;
+		if (!username || !credential) {
+			log('ERROR: Username and password are required for long-term credentials', 'err');
+			return;
+		}
+		log('Auth mode: long-term credentials (lt-cred-mech)');
+		log('Username: ' + username);
+	} else {
+		const secret = document.getElementById('secret').value;
+		const ttl = parseInt(document.getElementById('ttl').value) || 86400;
+		if (!secret) {
+			log('ERROR: Shared secret is required for ephemeral credentials', 'err');
+			return;
+		}
+		log('Auth mode: ephemeral credentials (use-auth-secret)');
+		const creds = await generateTurnCredentials(secret, ttl);
+		username = creds.username;
+		credential = creds.credential;
+		document.getElementById('gen-username').value = username;
+		document.getElementById('gen-credential').value = credential;
+		log('Username: ' + username);
+		log('Credential: ' + credential);
+	}
+
 	log('Testing ' + urls.length + ' URL(s) with 10s timeout each...');
 	log('iceTransportPolicy: relay (force relay-only candidates)');
 	log('');
