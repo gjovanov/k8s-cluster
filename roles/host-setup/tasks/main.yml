@@ -20,6 +20,7 @@
     - /etc/apt/sources.list.d/microsoft-prod.list
     - /etc/apt/sources.list.d/microsoft-prod.list.distUpgrade
     - /etc/apt/sources.list.d/kubernetes.list
+    - /etc/apt/sources.list.d/kubernetes-host.list
 
 - name: Clean apt cache and rebuild
   shell: |

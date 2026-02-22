@@ -90,8 +90,7 @@ if [ "$KEEP_VMS" = false ]; then
 
   # --- Clean up cloud images ---
   log "Cleaning up cloud-init artifacts..."
-  rm -f /var/lib/libvirt/images/k8s-*
-  rm -rf /var/lib/libvirt/images/k8s-*-cloud-init
+  rm -rf /var/lib/libvirt/images/k8s-*
 
   log "VMs and network removed"
 else

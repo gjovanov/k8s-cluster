@@ -114,20 +114,17 @@
     state: started
     daemon_reload: yes
 
-- name: Wait for containerd CRI to be ready
-  command: crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock version
-  register: cri_check
-  retries: 10
-  delay: 3
-  until: cri_check.rc == 0
-  changed_when: false
+- name: Wait for containerd socket to be ready
+  wait_for:
+    path: /var/run/containerd/containerd.sock
+    state: present
+    timeout: 30
 
 # --- Kubernetes packages ---
 - name: Add Kubernetes GPG key
   shell: |
     curl -fsSL {{ k8s_apt_key_url }} | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg --yes
-  args:
-    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  changed_when: true
 
 - name: Add Kubernetes repository
   copy:
