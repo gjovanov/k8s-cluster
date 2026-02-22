@@ -40,7 +40,7 @@ For our use case (WebRTC infra + a web app), this is actually *better*:
 
 Before we dive into the weeds, let's see what we're building:
 
-![Architecture Overview](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/01-architecture-overview.svg)
+![Architecture Overview](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/01-architecture-overview.png)
 
 One physical machine. Three virtual machines. A full K8s cluster. Two COTURN instances with separate public IPs. Monitoring. TLS. The whole nine yards.
 
@@ -50,7 +50,7 @@ Let me walk you through how we get there.
 
 Instead of running K8s directly on the host (which would be messy and inflexible), we use KVM/libvirt to spin up Ubuntu VMs with cloud-init. Think of it as our own mini-cloud, except we actually own the hardware.
 
-![Vm Network Topology](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/02-vm-network-topology.svg)
+![Vm Network Topology](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/02-vm-network-topology.png)
 
 The VMs sit on a NAT bridge (`virbr1` on `10.10.10.0/24`). The host acts as the gateway. Internet traffic reaches the VMs through iptables DNAT rules on the host — we'll get to that spicy part later.
 
@@ -141,7 +141,7 @@ What good is a cluster if you can't see what's happening inside it? We deploy th
 - **Grafana** — beautiful dashboards with pre-built views for cluster health
 - **AlertManager** — sends email alerts via SendGrid when things go sideways
 
-![Monitoring Stack](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/03-monitoring-stack.svg)
+![Monitoring Stack](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/03-monitoring-stack.png)
 
 We've configured alerts for the things that matter:
 
@@ -185,7 +185,7 @@ Here's a fun fact about WebRTC: it uses peer-to-peer connections. And here's a l
 
 That's where TURN servers come in. When a direct connection (or a STUN-assisted connection) fails, the TURN server acts as a relay — all media flows through it. It's not ideal (adds latency), but it's the only thing that works for users behind symmetric NATs, corporate firewalls, or restrictive networks.
 
-![Webrtc Nat Traversal](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/04-webrtc-nat-traversal.svg)
+![Webrtc Nat Traversal](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/04-webrtc-nat-traversal.png)
 
 Without TURN, roughly **10-15% of your users won't be able to join video calls**. On corporate networks, that number can be as high as **30-40%**. Ouch.
 
@@ -203,7 +203,7 @@ This means we can't just slap COTURN in a regular K8s pod and call it a day. We 
 
 We run **two COTURN instances**, one per worker node, each with its own dedicated public IP:
 
-![Coturn Architecture](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/05-coturn-architecture.svg)
+![Coturn Architecture](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/05-coturn-architecture.png)
 
 Why two instances? Redundancy, my friend. If one goes down, the other still serves clients. Plus, we happen to have two public IPs — might as well use both.
 
@@ -211,7 +211,7 @@ Why two instances? Redundancy, my friend. If one goes down, the other still serv
 
 Each COTURN instance is a K8s DaemonSet-like Deployment (1 replica, pinned to a specific node). Here's what the deployment looks like at a high level:
 
-![Coturn K8S Deployment](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/06-coturn-k8s-deployment.svg)
+![Coturn K8S Deployment](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/06-coturn-k8s-deployment.png)
 
 Each deployment gets its own ConfigMap because the `external-ip` mapping differs per instance:
 
@@ -291,7 +291,7 @@ credential = Base64(HMAC-SHA1(shared_secret, username))
 
 Our VMs are behind a NAT bridge (`10.10.10.0/24`). The internet can't reach them directly. We need iptables rules on the host to forward traffic:
 
-![Iptables Dnat Snat Flow](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/07-iptables-dnat-snat-flow.svg)
+![Iptables Dnat Snat Flow](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/07-iptables-dnat-snat-flow.png)
 
 For each public IP, we forward:
 
@@ -358,7 +358,7 @@ If all tests show relay candidates — congratulations, your COTURN deployment i
 
 The entire deployment is automated with Ansible and runs in 10 phases:
 
-![Deployment Phases](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/08-deployment-phases.svg)
+![Deployment Phases](https://raw.githubusercontent.com/gjovanov/k8s-cluster/master/docs/diagrams/08-deployment-phases.png)
 
 From zero to a fully operational K8s cluster with production COTURN in about 20 minutes of Ansible runtime. Not bad, eh?
 
