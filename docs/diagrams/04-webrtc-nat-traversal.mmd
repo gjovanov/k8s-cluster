@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant A as Browser A<br/>(behind NAT)
+    participant S as STUN Server
+    participant T as TURN Server
+    participant B as Browser B<br/>(behind NAT)
+
+    A->>S: What's my public IP?
+    S-->>A: You're 1.2.3.4:12345
+    A->>B: Hey, connect to 1.2.3.4:12345
+    B->>A: Can't reach you! (NAT blocked)
+
+    Note over A,B: STUN failed. Falling back to TURN relay.
+
+    A->>T: Allocate a relay port for me
+    T-->>A: Use relay 94.130.141.98:49200
+    A->>B: Connect via TURN relay
+    B->>T: OK, relaying through you
+    T->>A: Media flows through TURN
+    T->>B: Media flows through TURN
+
+    Note over T: All media now relayed through TURN

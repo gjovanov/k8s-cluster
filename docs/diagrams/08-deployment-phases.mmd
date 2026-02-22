@@ -1,0 +1,14 @@
+graph LR
+    P1["Phase 1<br/>Host Setup<br/>KVM/libvirt"] --> P2["Phase 2<br/>VM Provision<br/>cloud-init"]
+    P2 --> P3["Phase 3<br/>K8s Common<br/>containerd, kubeadm"]
+    P3 --> P4["Phase 4<br/>K8s Master<br/>kubeadm init + Cilium"]
+    P4 --> P5["Phase 5<br/>K8s Workers<br/>kubeadm join"]
+    P5 --> P6["Phase 6<br/>COTURN Deploy<br/>pods + configs"]
+    P6 --> P7["Phase 7<br/>Networking<br/>iptables DNAT/SNAT"]
+    P7 --> P8["Phase 8<br/>Host kubectl<br/>CLI setup"]
+    P8 --> P9["Phase 9<br/>SNI Proxy<br/>TURNS on :443"]
+    P9 --> P10["Phase 10<br/>Monitoring<br/>Prometheus + Grafana"]
+
+    style P1 fill:#e94560,color:#fff
+    style P6 fill:#e94560,color:#fff
+    style P10 fill:#e94560,color:#fff

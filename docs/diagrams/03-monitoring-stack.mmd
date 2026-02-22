@@ -1,0 +1,23 @@
+graph LR
+    subgraph K8s["K8s Cluster"]
+        P["Prometheus<br/>scrape metrics"]
+        G["Grafana<br/>dashboards"]
+        A["AlertManager<br/>email alerts"]
+        CT["COTURN Pods"]
+        RL["Roomler Pods"]
+    end
+
+    subgraph External
+        SG["SendGrid SMTP"]
+        EM["Admin Email"]
+    end
+
+    CT -->|"metrics"| P
+    RL -->|"metrics"| P
+    P --> G
+    P --> A
+    A -->|"SMTP"| SG
+    SG --> EM
+
+    style K8s fill:#16213e,color:#fff
+    style External fill:#533483,color:#fff

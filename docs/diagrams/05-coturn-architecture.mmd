@@ -1,0 +1,26 @@
+graph TB
+    subgraph Internet
+        C1["Client A<br/>(Corporate NAT)"]
+        C2["Client B<br/>(Home WiFi)"]
+    end
+
+    subgraph Host["Hetzner Host"]
+        IPT["iptables DNAT/SNAT"]
+
+        subgraph W1["k8s-worker1"]
+            CT1["COTURN Pod 1<br/>hostNetwork: true<br/>External: 94.130.141.98<br/>Internal: 10.10.10.11"]
+        end
+
+        subgraph W2["k8s-worker2"]
+            CT2["COTURN Pod 2<br/>hostNetwork: true<br/>External: 94.130.141.74<br/>Internal: 10.10.10.12"]
+        end
+    end
+
+    C1 -->|"turn:94.130.141.98:3478"| IPT
+    C2 -->|"turns:94.130.141.74:5349"| IPT
+    IPT -->|"DNAT to 10.10.10.11"| CT1
+    IPT -->|"DNAT to 10.10.10.12"| CT2
+
+    style Host fill:#1a1a2e,color:#fff
+    style W1 fill:#0f3460,color:#fff
+    style W2 fill:#0f3460,color:#fff

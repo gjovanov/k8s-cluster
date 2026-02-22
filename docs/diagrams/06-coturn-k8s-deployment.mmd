@@ -1,0 +1,15 @@
+graph TB
+    subgraph NS["Namespace: coturn"]
+        CM1["ConfigMap<br/>coturn-worker1-config<br/>(turnserver.conf)"]
+        CM2["ConfigMap<br/>coturn-worker2-config<br/>(turnserver.conf)"]
+        SEC["Secret<br/>coturn-tls<br/>(cert + key)"]
+        D1["Deployment<br/>coturn-worker1<br/>nodeSelector: k8s-worker1"]
+        D2["Deployment<br/>coturn-worker2<br/>nodeSelector: k8s-worker2"]
+    end
+
+    CM1 --> D1
+    CM2 --> D2
+    SEC --> D1
+    SEC --> D2
+
+    style NS fill:#533483,color:#fff

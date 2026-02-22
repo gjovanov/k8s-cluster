@@ -1,0 +1,21 @@
+graph LR
+    subgraph Internet
+        C["WebRTC Client"]
+    end
+
+    subgraph Host["Host iptables"]
+        DNAT["DNAT<br/>94.130.141.98:3478<br/>→ 10.10.10.11:3478"]
+        SNAT["SNAT<br/>Reply: 10.10.10.11<br/>→ 94.130.141.98"]
+    end
+
+    subgraph VM["k8s-worker1"]
+        CT["COTURN Pod"]
+    end
+
+    C -->|"UDP :3478"| DNAT
+    DNAT --> CT
+    CT --> SNAT
+    SNAT -->|"Reply"| C
+
+    style Host fill:#e94560,color:#fff
+    style VM fill:#0f3460,color:#fff

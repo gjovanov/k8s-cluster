@@ -1,0 +1,19 @@
+graph LR
+    subgraph Host["Host (Bare Metal)"]
+        LV["libvirt/QEMU"]
+        BR["virbr1 (NAT Bridge)<br/>10.10.10.0/24"]
+    end
+
+    subgraph VMs["Virtual Machines"]
+        M["k8s-master<br/>10.10.10.10"]
+        W1["k8s-worker1<br/>10.10.10.11"]
+        W2["k8s-worker2<br/>10.10.10.12"]
+    end
+
+    LV --> BR
+    BR --> M
+    BR --> W1
+    BR --> W2
+
+    style Host fill:#1a1a2e,color:#fff
+    style VMs fill:#0f3460,color:#fff

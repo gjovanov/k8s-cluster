@@ -1,0 +1,44 @@
+graph TB
+    subgraph Internet["Internet"]
+        Users["Users & WebRTC Clients"]
+    end
+
+    subgraph Hetzner["Hetzner Bare Metal Server"]
+        subgraph Host["Host OS (Ubuntu 22.04)"]
+            IPT["iptables<br/>DNAT/SNAT"]
+            NGX["Docker: nginx<br/>HTTP/3 + Brotli + GeoIP2"]
+            ACME["acme.sh<br/>Let's Encrypt Certs"]
+        end
+
+        subgraph KVM["KVM / libvirt"]
+            direction TB
+            subgraph Master["k8s-master<br/>2 vCPU / 4 GB / 40 GB"]
+                API["K8s Control Plane"]
+                CIL["Cilium CNI (eBPF)"]
+                MON["Prometheus + Grafana"]
+            end
+
+            subgraph W1["k8s-worker1<br/>4 vCPU / 8 GB / 60 GB"]
+                CT1["COTURN Pod<br/>IP: 94.130.141.98"]
+                APP["Roomler Stack"]
+            end
+
+            subgraph W2["k8s-worker2<br/>4 vCPU / 8 GB / 60 GB"]
+                CT2["COTURN Pod<br/>IP: 94.130.141.74"]
+            end
+
+            Master --- W1
+            Master --- W2
+        end
+    end
+
+    Users -->|"HTTPS :443"| NGX
+    Users -->|"TURN :3478 / TURNS :5349"| IPT
+    IPT --> CT1
+    IPT --> CT2
+    NGX -->|"NodePort"| APP
+
+    style Host fill:#1a1a2e,color:#fff
+    style Master fill:#16213e,color:#fff
+    style W1 fill:#0f3460,color:#fff
+    style W2 fill:#0f3460,color:#fff
