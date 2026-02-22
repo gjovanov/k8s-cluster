@@ -74,7 +74,9 @@ helm_install_script: "https://raw.githubusercontent.com/helm/helm/main/scripts/g
 # COTURN
 # =============================================================================
 coturn_realm: "roomler.live"
-coturn_auth_secret: "{{ lookup('env', 'COTURN_AUTH_SECRET') }}"
+coturn_auth_secret: "{{ lookup('env', 'COTURN_AUTH_SECRET') }}"  # kept for reference
+coturn_turn_username: "{{ lookup('env', 'TURN_USERNAME') | default('hammer', true) }}"
+coturn_turn_credential_key: "0x32c09cdc8033e01088f9b6b2f7450518"  # turnadmin -k -u hammer -r roomler.live -p <TURN_PASSWORD>
 coturn_image: "instrumentisto/coturn:latest"
 coturn_min_port: 49152
 coturn_max_port: 50175

@@ -31,13 +31,9 @@ iptables -t nat -N "$SNAT_CHAIN" 2>/dev/null || iptables -t nat -F "$SNAT_CHAIN"
 iptables -t nat -C POSTROUTING -j "$SNAT_CHAIN" 2>/dev/null || \
   iptables -t nat -I POSTROUTING 1 -j "$SNAT_CHAIN"
 
-# --- DNAT port 443 on IP1 to local SNI proxy (IP2 handled by Docker nginx2) ---
-iptables -t nat -A "$DNAT_CHAIN" \
-  -d {{ sni_proxy_public_ip }} -p tcp --dport 443 \
-  -j DNAT --to-destination 127.0.0.1:{{ sni_proxy_listen_port }}
-iptables -t nat -A "$OUTPUT_DNAT_CHAIN" \
-  -d {{ sni_proxy_public_ip }} -p tcp --dport 443 \
-  -j DNAT --to-destination 127.0.0.1:{{ sni_proxy_listen_port }}
+# NOTE: The old SNI proxy rules (TCP 443 -> 127.0.0.1:4443) were removed.
+# nginx2 (the SNI proxy) no longer exists; COTURN uses ports 3478/5349 directly.
+# TCP/UDP 443 is now handled by the host Docker nginx container for HTTPS.
 
 {% for rule in coturn_dnat_rules %}
 # --- Rules for {{ rule.public_ip }} --> {{ rule.dest_ip }} ---

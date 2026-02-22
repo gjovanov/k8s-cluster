@@ -33,8 +33,8 @@ data:
 
     # Security
     fingerprint
-    use-auth-secret
-    static-auth-secret={{ coturn_auth_secret }}
+    lt-cred-mech
+    user={{ coturn_turn_username }}:{{ coturn_turn_credential_key }}
     no-software-attribute
 
     # Disable multicast peers
