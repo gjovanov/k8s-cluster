@@ -14,7 +14,7 @@ Ansible-automated Kubernetes cluster on Hetzner bare metal for deploying a produ
 | Kubernetes | Helm v3 package management | Done |
 | COTURN | Dual TURN/STUN instances on separate public IPs | Done |
 | COTURN | TLS support (TURNS on port 5349 + 443 via SNI) | Done |
-| COTURN | Long-term credentials (lt-cred-mech) | Done |
+| COTURN | Ephemeral credentials (use-auth-secret / HMAC-SHA1) | Done |
 | COTURN | 1024 relay ports per instance (49152-50175) | Done |
 | Networking | iptables DNAT/SNAT port forwarding | Done |
 | Networking | ~~nginx SNI proxy~~ (removed, nginx2 no longer needed) | Removed |
@@ -35,7 +35,7 @@ Ansible-automated Kubernetes cluster on Hetzner bare metal for deploying a produ
 | VM Images | Ubuntu 22.04 Cloud (cloud-init) |
 | Orchestration | Kubernetes 1.29 |
 | CNI | Cilium 1.15.1 (eBPF, no kube-proxy) |
-| TURN Server | [coturn](https://github.com/coturn/coturn) (instrumentisto/coturn) |
+| TURN Server | [coturn](https://github.com/coturn/coturn) (coturn/coturn:latest) |
 | Proxy | Docker nginx (HTTP/3, brotli, GeoIP2 — routes to K8s NodePorts) |
 | TLS | Let's Encrypt (acme.sh, Cloudflare DNS-01) |
 | DNS | Cloudflare (API-managed) |
@@ -226,25 +226,27 @@ Each COTURN instance runs as a K8s pod with `hostNetwork: true`, pinned to a spe
 
 | Setting | Value |
 |---------|-------|
-| Image | `instrumentisto/coturn:latest` |
+| Image | `coturn/coturn:latest` |
 | Realm | `roomler.live` |
 | Listening port | 3478 (TCP + UDP) |
 | TLS port | 5349 (TCP) |
 | Alt TLS port | 443 (TCP, via SNI proxy) |
 | Relay port range | 49152 - 50175 (1024 ports) |
-| Auth method | `lt-cred-mech` (long-term credentials) |
+| Auth method | `use-auth-secret` (ephemeral HMAC-SHA1 credentials) |
 | TLS cert | Let's Encrypt wildcard (`*.roomler.live`) |
 
-### Long-Term Credentials
+### Ephemeral Credentials (TURN REST API)
 
-COTURN uses `lt-cred-mech` with a static username and HMAC key. Generate the key with:
+COTURN uses `use-auth-secret` with HMAC-SHA1 ephemeral credentials. The shared secret is stored in the COTURN ConfigMap as `static-auth-secret`.
 
+Clients generate credentials like this:
 ```bash
-# Inside COTURN pod
-kubectl exec -n coturn <pod> -- turnadmin -k -u <username> -r roomler.live -p <password>
-```
+# Username = expiry_timestamp:label
+USERNAME="$(date -d '+24 hours' +%s):myuser"
 
-The generated key (e.g., `0x32c09cdc8033e01088f9b6b2f7450518`) is stored in the COTURN ConfigMap as `user=<username>:<key>`.
+# Credential = Base64(HMAC-SHA1(secret, username))
+PASSWORD=$(echo -n "$USERNAME" | openssl dgst -sha1 -hmac "$COTURN_AUTH_SECRET" -binary | base64)
+```
 
 ### Testing COTURN
 
